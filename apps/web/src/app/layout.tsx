@@ -35,7 +35,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     )}
                   </a>
                   <span className="muted">
-                    {user.username} · {user.balance} cred
+                    <a href={`/players/${user.username}`}>{user.username}</a> · {user.balance} cred
                   </span>
                   <form action={logoutAction}>
                     <button className="btn ghost small" type="submit">
@@ -75,6 +75,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 <h4>Account</h4>
                 {user ? (
                   <>
+                    <a href={`/players/${user.username}`}>Your player page</a>
                     <a href="/notifications">Notifications</a>
                     <a href="/login">Switch account</a>
                   </>

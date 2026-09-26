@@ -98,7 +98,7 @@ function OpeningVoteSection({ kase, viewerId }: { kase: CaseRow; viewerId: strin
     <section className="sheet quiet">
       <h2>Opening vote</h2>
       <p className="small muted">
-        {kase.claimant?.username ?? "The claimant"} committed to <b>{kase.openingCertainty}%</b> before any audience number
+        {kase.claimant ? <a href={`/players/${kase.claimant.username}`}>{kase.claimant.username}</a> : "The claimant"} committed to <b>{kase.openingCertainty}%</b> before any audience number
         existed. The audience votes independently; the median seals once {QUORUM} distinct votes are in.
       </p>
       <QuorumBar have={votes.length} />
@@ -154,7 +154,9 @@ function ChallengeMarketSection({
                     <span className={c.type === "QUESTION" ? "type-q" : "type-c"}>
                       {c.type === "QUESTION" ? "Question" : "Counterfact"}
                     </span>
-                    <span className="muted">from {c.author.username}</span>
+                    <span className="muted">
+                      from <a href={`/players/${c.author.username}`}>{c.author.username}</a>
+                    </span>
                     {c.hidden && <span className="pill hidden-tag">Hidden, patron only</span>}
                     {topIds.has(c.id) && <span className="pill top">Top voted</span>}
                   </div>
@@ -177,7 +179,9 @@ function ChallengeMarketSection({
                     <span className={c.type === "QUESTION" ? "type-q" : "type-c"}>
                       {c.type === "QUESTION" ? "Question" : "Counterfact"}
                     </span>
-                    <span className="muted">from {c.author.username}</span>
+                    <span className="muted">
+                      from <a href={`/players/${c.author.username}`}>{c.author.username}</a>
+                    </span>
                     {topIds.has(c.id) && <span className="pill top">Top voted</span>}
                   </div>
                 </div>
@@ -241,7 +245,10 @@ function DefenseSection({
   return (
     <section className="sheet">
       <p className="who">Round {round} defense</p>
-      <h2>Claimant: {kase.claimant?.username ?? "—"}</h2>
+      <h2>
+        Claimant:{" "}
+        {kase.claimant ? <a href={`/players/${kase.claimant.username}`}>{kase.claimant.username}</a> : "—"}
+      </h2>
       <p className="small">
         <b>Current claim:</b> {kase.currentClaim}
       </p>
@@ -471,7 +478,10 @@ async function VerdictSection({ kase }: { kase: CaseRow }) {
         </p>
       </section>
       <section className="sheet quiet">
-        <h3>{kase.claimant?.username ?? "—"}&rsquo;s grade: {Math.round(kase.grade ?? 0)} of 100</h3>
+        <h3>
+          {kase.claimant ? <a href={`/players/${kase.claimant.username}`}>{kase.claimant.username}</a> : "—"}
+          &rsquo;s grade: {Math.round(kase.grade ?? 0)} of 100
+        </h3>
         <table>
           <tbody>
             <tr>

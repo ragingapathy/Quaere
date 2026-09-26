@@ -43,7 +43,7 @@ export default async function BountyDetailPage({
     <>
       <section className="sheet">
         <p className="who small muted">
-          Posted by {bounty.patron.username}, patron
+          Posted by <a href={`/players/${bounty.patron.username}`}>{bounty.patron.username}</a>, patron
           {user && user.id !== bounty.patronId && (
             <TipForm
               recipientId={bounty.patronId}
@@ -69,7 +69,7 @@ export default async function BountyDetailPage({
             <p className="who small muted">
               {bounty.case.claimant ? (
                 <>
-                  Claimant: {bounty.case.claimant.username}
+                  Claimant: <a href={`/players/${bounty.case.claimant.username}`}>{bounty.case.claimant.username}</a>
                   {user && user.id !== bounty.case.claimantId && (
                     <TipForm
                       recipientId={bounty.case.claimantId!}
@@ -161,7 +161,7 @@ export default async function BountyDetailPage({
               <div className="spread">
                 <div>
                   <span className="who small">
-                    {app.claimant.username}
+                    <a href={`/players/${app.claimant.username}`}>{app.claimant.username}</a>
                     <TipForm
                       recipientId={app.claimantId}
                       recipientName={app.claimant.username}

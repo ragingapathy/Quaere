@@ -18,3 +18,15 @@ export const CHALLENGE_PRICE = 20;
  * beyond "self-reported and encouraged"-style placeholders elsewhere; 1500
  * is a placeholder pending playtesting. */
 export const STARTING_GRANT = 1500;
+
+/**
+ * Tipping anti-abuse knobs. Registration mints cred; tipping is the only
+ * place cred moves between two wallets with no game mechanic in between, so
+ * it's gated by lib/tipping.ts rather than left open. No burn/fee on top of
+ * these — a tip is still 1:1, cred in equals cred out, per the Decision
+ * Log's "a tip moves cred out of the tipper's own current balance; it mints
+ * nothing." All three numbers are placeholders pending playtesting.
+ */
+export const MAX_TIP_AMOUNT = 500;
+export const TIP_DAILY_CAP_PER_SENDER = 1000;
+export const TIP_LIFETIME_CAP_PER_PAIR = 1000;

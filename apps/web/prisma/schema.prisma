@@ -45,6 +45,8 @@ enum LedgerReason {
   BOUNTY_ESCROW
   BOUNTY_REFUND
   STARTING_GRANT
+  TIP_SENT
+  TIP_RECEIVED
 }
 
 model User {
@@ -64,6 +66,8 @@ model User {
   applications   Application[]
   casesAsClaimant Case[]       @relation("ClaimantCases")
   ledgerEntries  LedgerEntry[]
+  tipsSent       Tip[]         @relation("TipsSent")
+  tipsReceived   Tip[]         @relation("TipsReceived")
 }
 
 /// A patron's call for a claimant: "the bounty board" itself. Posting one
@@ -119,6 +123,26 @@ model Case {
 
   claimant   User   @relation("ClaimantCases", fields: [claimantId], references: [id])
   claimantId String
+}
+
+/// A direct cred gift, separate from playing a role in a case (Decision
+/// Log: "a tip moves cred out of the tipper's own current balance; it mints
+/// nothing"). Gated in the app layer, not just the schema, to keep a fresh
+/// account from minting cred at registration and immediately laundering it
+/// to another wallet — see lib/tipping.ts.
+model Tip {
+  id        String   @id @default(cuid())
+  amount    Int
+  note      String?
+  createdAt DateTime @default(now())
+
+  sender      User   @relation("TipsSent", fields: [senderId], references: [id])
+  senderId    String
+  recipient   User   @relation("TipsReceived", fields: [recipientId], references: [id])
+  recipientId String
+
+  /// Optional context: the bounty page a tip was sent from, if any.
+  bountyId String?
 }
 
 /// Every cred movement, so a balance is always reconstructable and never

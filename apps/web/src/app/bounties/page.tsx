@@ -77,11 +77,21 @@ export default async function BountyBoardPage() {
             <div className="n">{stats.largestOpenBounty != null ? fmt(stats.largestOpenBounty) : "—"}</div>
             <div className="l">Largest open bounty</div>
           </div>
+          <div className="stat">
+            <div className="n">{fmt(stats.totalTipped)}</div>
+            <div className="l">Cred ever tipped ({stats.tipCount})</div>
+          </div>
+          <div className="stat">
+            <div className="n">{stats.tipShareOfMintedPct.toFixed(1)}%</div>
+            <div className="l">Of minted cred moved as tips</div>
+          </div>
         </div>
         <p className="tiny muted" style={{ marginTop: 10 }}>
           Wallets + escrow ({fmt(stats.totalInWallets + stats.totalEscrowed)}) should always equal
           cred minted ({fmt(stats.totalMinted)}) — nothing here creates or destroys cred beyond
-          registration.
+          registration. Tips move cred between wallets 1:1 and don&rsquo;t change that total; they&rsquo;re
+          broken out here because a tip is the one transfer with no game mechanic gating it, so an
+          unusual share of tipped cred is worth a second look.
         </p>
       </section>
 

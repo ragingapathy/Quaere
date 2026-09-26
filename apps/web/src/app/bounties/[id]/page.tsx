@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { applyToBountyAction, selectClaimantAction, withdrawApplicationAction } from "@/lib/actions/bounties";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { TipForm } from "@/components/TipForm";
 
 export default async function BountyDetailPage({
   params,
@@ -31,11 +32,22 @@ export default async function BountyDetailPage({
 
   const applyAction = applyToBountyAction.bind(null, bounty.id);
   const withdrawAction = withdrawApplicationAction.bind(null, bounty.id);
+  const returnPath = `/bounties/${bounty.id}`;
 
   return (
     <>
       <section className="sheet">
-        <p className="who small muted">Posted by {bounty.patron.username}, patron</p>
+        <p className="who small muted">
+          Posted by {bounty.patron.username}, patron
+          {user && user.id !== bounty.patronId && (
+            <TipForm
+              recipientId={bounty.patronId}
+              recipientName={bounty.patron.username}
+              bountyId={bounty.id}
+              returnPath={returnPath}
+            />
+          )}
+        </p>
         <h1>
           {bounty.amount} cred for a claim about {bounty.topic}
         </h1>
@@ -49,7 +61,17 @@ export default async function BountyDetailPage({
       {bounty.case && (
         <section className="sheet quiet">
           <h2>The case</h2>
-          <p className="who small muted">Claimant: {bounty.case.claimant.username}</p>
+          <p className="who small muted">
+            Claimant: {bounty.case.claimant.username}
+            {user && user.id !== bounty.case.claimantId && (
+              <TipForm
+                recipientId={bounty.case.claimantId}
+                recipientName={bounty.case.claimant.username}
+                bountyId={bounty.id}
+                returnPath={returnPath}
+              />
+            )}
+          </p>
           <p className="serif" style={{ fontSize: 18 }}>
             {bounty.case.currentClaim}
           </p>
@@ -124,7 +146,15 @@ export default async function BountyDetailPage({
             <div className="entry" key={app.id}>
               <div className="spread">
                 <div>
-                  <span className="who small">{app.claimant.username}</span>
+                  <span className="who small">
+                    {app.claimant.username}
+                    <TipForm
+                      recipientId={app.claimantId}
+                      recipientName={app.claimant.username}
+                      bountyId={bounty.id}
+                      returnPath={returnPath}
+                    />
+                  </span>
                   <p className="serif" style={{ margin: "4px 0", fontSize: 16 }}>
                     {app.claimText}
                   </p>

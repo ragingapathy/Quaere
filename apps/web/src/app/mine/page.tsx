@@ -35,19 +35,33 @@ export default async function MinePage() {
     }),
   ]);
 
-  type Row = { bountyId: string; topic: string; stage: string | null; bountyStatus: string; roles: Set<string> };
+  type Row = {
+    bountyId: string;
+    topic: string;
+    stage: string | null;
+    frozen: boolean;
+    bountyStatus: string;
+    roles: Set<string>;
+  };
   const byBounty = new Map<string, Row>();
 
-  function upsert(bountyId: string, topic: string, stage: string | null, bountyStatus: string, role: string) {
-    const row = byBounty.get(bountyId) ?? { bountyId, topic, stage, bountyStatus, roles: new Set<string>() };
+  function upsert(
+    bountyId: string,
+    topic: string,
+    stage: string | null,
+    frozen: boolean,
+    bountyStatus: string,
+    role: string,
+  ) {
+    const row = byBounty.get(bountyId) ?? { bountyId, topic, stage, frozen, bountyStatus, roles: new Set<string>() };
     row.roles.add(role);
     byBounty.set(bountyId, row);
   }
 
-  for (const b of asPatron) upsert(b.id, b.topic, b.case?.stage ?? null, b.status, "patron");
-  for (const c of asClaimant) upsert(c.bounty.id, c.bounty.topic, c.stage, c.bounty.status, "claimant");
+  for (const b of asPatron) upsert(b.id, b.topic, b.case?.stage ?? null, !!b.case?.frozenAt, b.status, "patron");
+  for (const c of asClaimant) upsert(c.bounty.id, c.bounty.topic, c.stage, !!c.frozenAt, c.bounty.status, "claimant");
   for (const p of participantRows) {
-    upsert(p.case.bounty.id, p.case.bounty.topic, p.case.stage, p.case.bounty.status, "audience");
+    upsert(p.case.bounty.id, p.case.bounty.topic, p.case.stage, !!p.case.frozenAt, p.case.bounty.status, "audience");
   }
 
   const rows = [...byBounty.values()].sort((a, b) => {
@@ -70,8 +84,14 @@ export default async function MinePage() {
                 {[...r.roles].join(", ")}
               </p>
             </div>
-            <span className="pill">
-              {r.stage ? STAGE_LABEL[r.stage] ?? r.stage : r.bountyStatus === "OPEN" ? "Awaiting a claimant" : r.bountyStatus}
+            <span className={`pill ${r.frozen ? "warn" : ""}`}>
+              {r.frozen
+                ? "Frozen — needs a claimant"
+                : r.stage
+                  ? STAGE_LABEL[r.stage] ?? r.stage
+                  : r.bountyStatus === "OPEN"
+                    ? "Awaiting a claimant"
+                    : r.bountyStatus}
             </span>
           </div>
         </div>

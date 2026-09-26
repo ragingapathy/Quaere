@@ -91,6 +91,7 @@ export async function buyRoundAction(bountyId: string, round: 1 | 2, formData: F
   if (!found) fail(path, "This case doesn't exist yet.");
   const { kase, bounty } = found;
   if (bounty.patronId !== user.id) fail(path, "Only the patron can buy a round.");
+  if (!kase.claimantId) fail(path, "This case has no claimant right now.");
   const expectedStage = round === 1 ? "ROUND_1_OPEN" : "ROUND_2_OPEN";
   if (kase.stage !== expectedStage) fail(path, `Round ${round} isn't open for buying right now.`);
 
@@ -126,7 +127,10 @@ export async function buyRoundAction(bountyId: string, round: 1 | 2, formData: F
     }
     await tx.case.update({
       where: { id: kase.id },
-      data: { stage: round === 1 ? "ROUND_1_DEFENSE" : "ROUND_2_DEFENSE" },
+      data: {
+        stage: round === 1 ? "ROUND_1_DEFENSE" : "ROUND_2_DEFENSE",
+        awaitingClaimantSince: new Date(),
+      },
     });
   });
 
@@ -264,6 +268,80 @@ export async function castCertaintyVoteAction(
   });
   await joinPool(kase.id, user.id);
   await checkAndAdvanceCase(kase.id);
+
+  revalidatePath(path);
+  redirect(path);
+}
+
+/** First-come adoption of a frozen claim. Race-safe: the conditional
+ * updateMany only succeeds for whoever's request lands first — a second
+ * click after that finds zero matching rows and fails cleanly. */
+export async function adoptFrozenClaimAction(bountyId: string): Promise<void> {
+  const user = await requireCurrentUser();
+  const path = `/bounties/${bountyId}`;
+  const found = await loadCase(bountyId);
+  if (!found) fail(path, "This case doesn't exist yet.");
+  const { kase, bounty } = found;
+  if (!kase.frozenAt) fail(path, "This case isn't frozen.");
+  if (bounty.patronId === user.id) fail(path, "The patron doesn't play their own case.");
+  if (kase.barredClaimantIds.includes(user.id)) {
+    fail(path, "You already walked away from this claim once — someone else has to pick it up.");
+  }
+
+  const updated = await prisma.case.updateMany({
+    where: { id: kase.id, frozenAt: { not: null }, claimantId: null },
+    data: { claimantId: user.id, frozenAt: null, awaitingClaimantSince: new Date() },
+  });
+  if (updated.count === 0) fail(path, "Someone else just adopted this claim.");
+
+  await notify(prisma, bounty.patronId, "CLAIM_ADOPTED", `${user.username} adopted your frozen case.`, kase.id);
+  await checkAndAdvanceCase(kase.id);
+
+  revalidatePath(path);
+  redirect(path);
+}
+
+/** The patron's exit valve on a case stuck frozen: pulls back whatever's
+ * left of escrow rather than leaving cred locked to a topic going nowhere.
+ * Refunds pro-rata across the original escrow and any top-ups, so a
+ * canceled case doesn't quietly enrich the patron with someone else's
+ * top-up money. Challenge authors already paid at buy time keep that either
+ * way. */
+export async function cancelFrozenCaseAction(bountyId: string): Promise<void> {
+  const user = await requireCurrentUser();
+  const path = `/bounties/${bountyId}`;
+  const bounty = await prisma.bounty.findUnique({ where: { id: bountyId }, include: { case: true } });
+  if (!bounty?.case) fail(path, "This case doesn't exist.");
+  if (bounty.patronId !== user.id) fail(path, "Only the patron can cancel this case.");
+  if (!bounty.case.frozenAt) fail(path, "This case isn't frozen.");
+
+  const [spentAgg, contributions] = await Promise.all([
+    prisma.ledgerEntry.aggregate({ where: { bountyId, reason: "CHALLENGE_PURCHASE" }, _sum: { amount: true } }),
+    prisma.bountyContribution.findMany({ where: { bountyId } }),
+  ]);
+  const spent = spentAgg._sum.amount ?? 0;
+  const remaining = bounty.amount - spent;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.case.update({ where: { id: bounty.case!.id }, data: { stage: "FORFEITED" } });
+    await tx.bounty.update({ where: { id: bountyId }, data: { status: "LAPSED" } });
+
+    if (remaining > 0) {
+      const contributedByPatron = bounty.amount - contributions.reduce((s, c) => s + c.amount, 0);
+      const shares = [
+        { userId: bounty.patronId, put: contributedByPatron },
+        ...contributions.map((c) => ({ userId: c.contributorId, put: c.amount })),
+      ];
+      let refunded = 0;
+      for (const [i, s] of shares.entries()) {
+        const share = i === shares.length - 1 ? remaining - refunded : Math.floor((remaining * s.put) / bounty.amount);
+        refunded += share;
+        if (share > 0) {
+          await postLedgerEntry(tx, { userId: s.userId, amount: share, reason: "BOUNTY_REFUND", bountyId });
+        }
+      }
+    }
+  });
 
   revalidatePath(path);
   redirect(path);

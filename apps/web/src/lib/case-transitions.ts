@@ -10,7 +10,7 @@ import {
 import { prisma } from "./db";
 import { postLedgerEntry } from "./ledger";
 import { notify } from "./notify";
-import { CHALLENGE_PRICE, QUORUM } from "./constants";
+import { CHALLENGE_PRICE, LAPSE_HOURS, QUORUM } from "./constants";
 
 type ChallengeWithRulings = {
   id: string;
@@ -65,13 +65,22 @@ async function sealStageIfReady(
         c.id,
       );
     }
+    // Set-once: only stamps the deadline the first time quorum is seen
+    // reached, so repeated page views don't keep pushing it forward.
+    await prisma.case.updateMany({
+      where: { id: c.id, awaitingClaimantSince: null },
+      data: { awaitingClaimantSince: new Date() },
+    });
     return false;
   }
 
   const median = trimmedMedian(votes.map((v) => v.value));
   const field =
     stage === "OPENING" ? "openingAudience" : stage === "INTERIM" ? "interimAudience" : "finalAudience";
-  await prisma.case.update({ where: { id: c.id }, data: { [field]: median, stage: nextStage } });
+  await prisma.case.update({
+    where: { id: c.id },
+    data: { [field]: median, stage: nextStage, awaitingClaimantSince: null },
+  });
 
   await notify(
     prisma,
@@ -130,7 +139,7 @@ async function closeRoundIfSettled(
 
   await prisma.case.update({
     where: { id: c.id },
-    data: { currentClaim, wasNarrowed, wasRetreat, stage: nextStage },
+    data: { currentClaim, wasNarrowed, wasRetreat, stage: nextStage, awaitingClaimantSince: null },
   });
 
   await notify(prisma, c.claimantId, "ROUND_CLOSED", `Round ${round} closed.`, c.id);
@@ -164,6 +173,10 @@ async function sealFinalAndResolve(c: {
         c.id,
       );
     }
+    await prisma.case.updateMany({
+      where: { id: c.id, awaitingClaimantSince: null },
+      data: { awaitingClaimantSince: new Date() },
+    });
     return false;
   }
   if (c.openingAudience == null || c.interimAudience == null || c.interimCertainty == null) return false;
@@ -207,6 +220,7 @@ async function sealFinalAndResolve(c: {
       data: {
         finalAudience,
         stage: "VERDICT",
+        awaitingClaimantSince: null,
         verdict: result.verdict.toUpperCase() as
           | "UPHELD"
           | "AMENDED"
@@ -264,21 +278,88 @@ async function sealFinalAndResolve(c: {
   return true;
 }
 
+/** Has the claimant done their own part for the stage that's waiting on
+ * them? True for any stage that doesn't wait on the claimant at all — a
+ * lapse can only be declared on a stage this can meaningfully answer "no"
+ * for. A round with slow jurors but a claimant who answered everything is
+ * not a lapse; only a genuinely quiet claimant is. */
+async function claimantHasActed(c: {
+  id: string;
+  stage: CaseStage;
+  interimCertainty: number | null;
+  finalCertainty: number | null;
+}): Promise<boolean> {
+  if (c.stage === "ROUND_1_DEFENSE" || c.stage === "ROUND_2_DEFENSE") {
+    const round = c.stage === "ROUND_1_DEFENSE" ? 1 : 2;
+    const challenges = await prisma.challenge.findMany({ where: { caseId: c.id, round } });
+    return challenges.length > 0 && challenges.every((ch) => isAnswered({ ...ch, rulings: [] }));
+  }
+  if (c.stage === "AWAITING_INTERIM_VOTE") return c.interimCertainty != null;
+  if (c.stage === "AWAITING_FINAL_VOTE") return c.finalCertainty != null;
+  return true;
+}
+
+/** Freezes a case whose claimant has gone quiet for LAPSE_HOURS past the
+ * moment they were last on the hook — clearing claimantId but touching
+ * nothing else (bought challenges, rulings, votes all stand as they are)
+ * so a new claimant can adopt it exactly where the old one left off. */
+async function freezeIfLapsed(c: {
+  id: string;
+  claimantId: string | null;
+  frozenAt: Date | null;
+  awaitingClaimantSince: Date | null;
+  stage: CaseStage;
+  interimCertainty: number | null;
+  finalCertainty: number | null;
+  bounty: { patronId: string };
+}): Promise<boolean> {
+  if (c.frozenAt || !c.claimantId || !c.awaitingClaimantSince) return false;
+  const elapsedMs = Date.now() - c.awaitingClaimantSince.getTime();
+  if (elapsedMs < LAPSE_HOURS * 3600_000) return false;
+  if (await claimantHasActed(c)) return false;
+
+  await prisma.case.update({
+    where: { id: c.id },
+    data: {
+      frozenAt: new Date(),
+      claimantId: null,
+      barredClaimantIds: { push: c.claimantId },
+    },
+  });
+
+  await notify(
+    prisma,
+    c.bounty.patronId,
+    "CASE_FROZEN",
+    "Your claimant went quiet — the case is frozen, open for someone else to adopt.",
+    c.id,
+  );
+  const participants = await prisma.caseParticipant.findMany({ where: { caseId: c.id } });
+  for (const p of participants) {
+    await notify(prisma, p.userId, "CASE_FROZEN", "A case you're following is frozen, waiting on a new claimant.", c.id);
+  }
+  return true;
+}
+
 async function tryAdvanceOnce(caseId: string): Promise<boolean> {
   const c = await prisma.case.findUnique({ where: { id: caseId }, include: { bounty: true } });
   if (!c) return false;
+  if (c.frozenAt) return false; // nothing moves again until someone adopts it
+  if (await freezeIfLapsed(c)) return true;
+  if (!c.claimantId) return false; // shouldn't happen outside the frozen states above
 
+  const claimantId = c.claimantId;
   switch (c.stage) {
     case "AWAITING_OPENING_VOTE":
-      return sealStageIfReady(c, "OPENING", "ROUND_1_OPEN", c.openingCertainty);
+      return sealStageIfReady({ ...c, claimantId }, "OPENING", "ROUND_1_OPEN", c.openingCertainty);
     case "ROUND_1_DEFENSE":
-      return closeRoundIfSettled(c, 1, "AWAITING_INTERIM_VOTE");
+      return closeRoundIfSettled({ ...c, claimantId }, 1, "AWAITING_INTERIM_VOTE");
     case "AWAITING_INTERIM_VOTE":
-      return sealStageIfReady(c, "INTERIM", "ROUND_2_OPEN", c.interimCertainty);
+      return sealStageIfReady({ ...c, claimantId }, "INTERIM", "ROUND_2_OPEN", c.interimCertainty);
     case "ROUND_2_DEFENSE":
-      return closeRoundIfSettled(c, 2, "AWAITING_FINAL_VOTE");
+      return closeRoundIfSettled({ ...c, claimantId }, 2, "AWAITING_FINAL_VOTE");
     case "AWAITING_FINAL_VOTE":
-      return sealFinalAndResolve(c);
+      return sealFinalAndResolve({ ...c, claimantId });
     default:
       return false;
   }

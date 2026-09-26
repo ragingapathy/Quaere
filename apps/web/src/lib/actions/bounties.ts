@@ -46,6 +46,31 @@ export async function postBountyAction(formData: FormData): Promise<void> {
   redirect(`/bounties/${bounty.id}`);
 }
 
+/** Anyone can add to a frozen case's bounty to entice someone to adopt it.
+ * No burn, same spirit as tipping: the cred goes straight into the pool the
+ * eventual verdict pays out of. */
+export async function topUpBountyAction(bountyId: string, formData: FormData): Promise<void> {
+  const user = await requireCurrentUser();
+  const path = `/bounties/${bountyId}`;
+
+  const bounty = await prisma.bounty.findUnique({ where: { id: bountyId }, include: { case: true } });
+  if (!bounty) fail(path, "This bounty no longer exists.");
+  if (!bounty.case?.frozenAt) fail(path, "Top-ups are only for a case that's frozen, awaiting a new claimant.");
+
+  const amount = Math.floor(Number(formData.get("amount")));
+  if (!Number.isFinite(amount) || amount <= 0) fail(path, "Top-up must be a positive number of cred.");
+  if (amount > user.balance) fail(path, `You only have ${user.balance} cred.`);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.bounty.update({ where: { id: bountyId }, data: { amount: { increment: amount } } });
+    await tx.bountyContribution.create({ data: { bountyId, contributorId: user.id, amount } });
+    await postLedgerEntry(tx, { userId: user.id, amount: -amount, reason: "BOUNTY_TOPUP", bountyId });
+  });
+
+  revalidatePath(path);
+  redirect(path);
+}
+
 export async function applyToBountyAction(bountyId: string, formData: FormData): Promise<void> {
   const user = await requireCurrentUser();
   const detailPath = `/bounties/${bountyId}`;

@@ -2,7 +2,9 @@ import { calibration, challengeFraction, describeSwing, VERDICT_COPY } from "@qu
 import { prisma } from "@/lib/db";
 import { QUORUM, CHALLENGE_PRICE, CHALLENGES_PER_ROUND } from "@/lib/constants";
 import {
+  adoptFrozenClaimAction,
   buyRoundAction,
+  cancelFrozenCaseAction,
   castCertaintyVoteAction,
   commitCertaintyAction,
   submitChallengeAction,
@@ -11,6 +13,7 @@ import {
   submitRulingAction,
   upvoteChallengeAction,
 } from "@/lib/actions/round";
+import { topUpBountyAction } from "@/lib/actions/bounties";
 
 type CaseRow = Awaited<ReturnType<typeof loadFullCase>>;
 
@@ -95,7 +98,7 @@ function OpeningVoteSection({ kase, viewerId }: { kase: CaseRow; viewerId: strin
     <section className="sheet quiet">
       <h2>Opening vote</h2>
       <p className="small muted">
-        {kase.claimant.username} committed to <b>{kase.openingCertainty}%</b> before any audience number
+        {kase.claimant?.username ?? "The claimant"} committed to <b>{kase.openingCertainty}%</b> before any audience number
         existed. The audience votes independently; the median seals once {QUORUM} distinct votes are in.
       </p>
       <QuorumBar have={votes.length} />
@@ -238,7 +241,7 @@ function DefenseSection({
   return (
     <section className="sheet">
       <p className="who">Round {round} defense</p>
-      <h2>Claimant: {kase.claimant.username}</h2>
+      <h2>Claimant: {kase.claimant?.username ?? "—"}</h2>
       <p className="small">
         <b>Current claim:</b> {kase.currentClaim}
       </p>
@@ -468,7 +471,7 @@ async function VerdictSection({ kase }: { kase: CaseRow }) {
         </p>
       </section>
       <section className="sheet quiet">
-        <h3>{kase.claimant.username}&rsquo;s grade: {Math.round(kase.grade ?? 0)} of 100</h3>
+        <h3>{kase.claimant?.username ?? "—"}&rsquo;s grade: {Math.round(kase.grade ?? 0)} of 100</h3>
         <table>
           <tbody>
             <tr>
@@ -515,6 +518,71 @@ async function VerdictSection({ kase }: { kase: CaseRow }) {
   );
 }
 
+function FrozenSection({
+  kase,
+  bountyId,
+  viewerId,
+  isPatron,
+}: {
+  kase: CaseRow;
+  bountyId: string;
+  viewerId: string | null;
+  isPatron: boolean;
+}) {
+  const barred = viewerId ? kase.barredClaimantIds.includes(viewerId) : false;
+  return (
+    <section className="sheet quiet">
+      <h2>Frozen — awaiting a new claimant</h2>
+      <p className="small muted">
+        The last claimant went quiet for {"48"} hours. Everything else stands exactly as it was —
+        the same claim, the same bought challenges, the same rulings and votes already in —
+        waiting on someone new to pick up the defense.
+      </p>
+      <p className="small">
+        <b>Claim:</b> {kase.currentClaim}
+      </p>
+
+      {viewerId && !isPatron && !barred && (
+        <form action={adoptFrozenClaimAction.bind(null, bountyId)} style={{ marginTop: 8 }}>
+          <button className="btn" type="submit">
+            Adopt this claim
+          </button>
+        </form>
+      )}
+      {barred && (
+        <p className="small muted" style={{ marginTop: 8 }}>
+          You already walked away from this claim once — someone else has to pick it up.
+        </p>
+      )}
+      {!viewerId && (
+        <p className="small muted" style={{ marginTop: 8 }}>
+          <a href="/login">Log in</a> or <a href="/register">register</a> to adopt it.
+        </p>
+      )}
+
+      {viewerId && (
+        <form action={topUpBountyAction.bind(null, bountyId)} className="row" style={{ marginTop: 16, alignItems: "flex-end" }}>
+          <label className="field" style={{ maxWidth: 160 }}>
+            <span>Add cred to entice a taker</span>
+            <input type="number" name="amount" min={1} required />
+          </label>
+          <button className="btn ghost small" type="submit">
+            Top up
+          </button>
+        </form>
+      )}
+
+      {isPatron && (
+        <form action={cancelFrozenCaseAction.bind(null, bountyId)} style={{ marginTop: 16 }}>
+          <button className="btn danger small" type="submit">
+            Cancel and reclaim remaining escrow
+          </button>
+        </form>
+      )}
+    </section>
+  );
+}
+
 export default async function CaseRoundPlay({
   bountyId,
   caseId,
@@ -544,29 +612,35 @@ export default async function CaseRoundPlay({
         </section>
       )}
 
-      {kase.stage === "AWAITING_OPENING_VOTE" && <OpeningVoteSection kase={kase} viewerId={viewerId} />}
-      {kase.stage === "ROUND_1_OPEN" && (
-        <ChallengeMarketSection kase={kase} round={1} viewerId={viewerId} isPatron={isPatron} />
-      )}
-      {kase.stage === "ROUND_1_DEFENSE" && <DefenseSection kase={kase} round={1} viewerId={viewerId} />}
-      {kase.stage === "AWAITING_INTERIM_VOTE" && (
-        <InterimOrFinalVoteSection kase={kase} stage="INTERIM" viewerId={viewerId} />
-      )}
-      {kase.stage === "ROUND_2_OPEN" && (
-        <ChallengeMarketSection kase={kase} round={2} viewerId={viewerId} isPatron={isPatron} />
-      )}
-      {kase.stage === "ROUND_2_DEFENSE" && <DefenseSection kase={kase} round={2} viewerId={viewerId} />}
-      {kase.stage === "AWAITING_FINAL_VOTE" && (
-        <InterimOrFinalVoteSection kase={kase} stage="FINAL" viewerId={viewerId} />
-      )}
-      {kase.stage === "VERDICT" && <VerdictSection kase={kase} />}
-      {!viewerId && kase.stage !== "VERDICT" && (
-        <section className="sheet quiet">
-          <p className="small">
-            <a href="/login">Log in</a> or <a href="/register">register</a> to vote, challenge, or rule on this
-            case.
-          </p>
-        </section>
+      {kase.frozenAt ? (
+        <FrozenSection kase={kase} bountyId={bountyId} viewerId={viewerId} isPatron={isPatron} />
+      ) : (
+        <>
+          {kase.stage === "AWAITING_OPENING_VOTE" && <OpeningVoteSection kase={kase} viewerId={viewerId} />}
+          {kase.stage === "ROUND_1_OPEN" && (
+            <ChallengeMarketSection kase={kase} round={1} viewerId={viewerId} isPatron={isPatron} />
+          )}
+          {kase.stage === "ROUND_1_DEFENSE" && <DefenseSection kase={kase} round={1} viewerId={viewerId} />}
+          {kase.stage === "AWAITING_INTERIM_VOTE" && (
+            <InterimOrFinalVoteSection kase={kase} stage="INTERIM" viewerId={viewerId} />
+          )}
+          {kase.stage === "ROUND_2_OPEN" && (
+            <ChallengeMarketSection kase={kase} round={2} viewerId={viewerId} isPatron={isPatron} />
+          )}
+          {kase.stage === "ROUND_2_DEFENSE" && <DefenseSection kase={kase} round={2} viewerId={viewerId} />}
+          {kase.stage === "AWAITING_FINAL_VOTE" && (
+            <InterimOrFinalVoteSection kase={kase} stage="FINAL" viewerId={viewerId} />
+          )}
+          {kase.stage === "VERDICT" && <VerdictSection kase={kase} />}
+          {!viewerId && kase.stage !== "VERDICT" && (
+            <section className="sheet quiet">
+              <p className="small">
+                <a href="/login">Log in</a> or <a href="/register">register</a> to vote, challenge, or rule on
+                this case.
+              </p>
+            </section>
+          )}
+        </>
       )}
     </>
   );

@@ -39,3 +39,10 @@ export const TIP_LIFETIME_CAP_PER_PAIR = 1000;
  * U.S. Supreme Court, which is exactly as arbitrary and exactly as final.
  */
 export const QUORUM = 9;
+
+/**
+ * How long a claimant can go quiet — no answer to a bought round, no
+ * certainty commit once a vote hits quorum — before the case freezes and
+ * opens up for someone else to adopt. Placeholder pending playtesting.
+ */
+export const LAPSE_HOURS = 48;

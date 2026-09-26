@@ -11,6 +11,8 @@ const TYPE_LABEL: Record<string, string> = {
   ROUND_CLOSED: "Round closed",
   VERDICT_READY: "Verdict",
   TIP_RECEIVED: "Tip received",
+  CASE_FROZEN: "Case frozen",
+  CLAIM_ADOPTED: "Claim adopted",
 };
 
 export default async function NotificationsPage() {

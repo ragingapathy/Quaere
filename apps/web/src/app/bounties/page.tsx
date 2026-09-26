@@ -131,11 +131,14 @@ export default async function BountyBoardPage() {
                 <div>
                   <a href={`/bounties/${b.id}`}>{b.topic}</a>
                   <p className="tiny muted" style={{ margin: "2px 0 0" }}>
-                    {b.case?.claimant.username} is staking:{" "}
-                    {b.case?.currentClaim ?? "(claim pending)"}
+                    {b.case?.claimant
+                      ? `${b.case.claimant.username} is staking: ${b.case.currentClaim}`
+                      : "Frozen — the claimant went quiet, open for someone else to adopt"}
                   </p>
                 </div>
-                <span className="pill claimed">Claimed</span>
+                <span className={`pill ${b.case?.frozenAt ? "warn" : "claimed"}`}>
+                  {b.case?.frozenAt ? "Frozen" : "Claimed"}
+                </span>
               </div>
             </div>
           ))}

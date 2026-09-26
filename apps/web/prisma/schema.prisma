@@ -5,10 +5,15 @@
 // the actual scoring math (resolveCase, resolveEscrow, verdictOf) as pure
 // functions; everything here just persists the inputs and outputs of those.
 //
-// Deliberately NOT modeled yet: the 48-hour backstop's Forfeited/Lapsed
-// outcomes. The Decision Log itself still lists "how does escrow split on
-// Forfeited?" as an open question, so that state machine isn't implemented
-// — only the happy path (quorum met, claimant responds) is.
+// The 48-hour backstop: a case whose claimant goes quiet (doesn't answer a
+// bought round, or doesn't commit certainty once a vote hits quorum) gets
+// frozen in place — claimantId cleared, everything else left exactly as it
+// stood — rather than refunded and deleted. Anyone not barred (i.e. not the
+// claimant who walked away) can adopt it with one click and pick up the
+// defense; anyone can top up the remaining bounty to entice a taker, no
+// burn, same spirit as tipping. The patron's own exit valve is to cancel a
+// frozen case outright, pulling back whatever's left of escrow — challenge
+// authors keep what they were already paid at buy time either way.
 
 generator client {
   provider = "prisma-client-js"
@@ -93,11 +98,14 @@ enum NotificationType {
   ROUND_CLOSED
   VERDICT_READY
   TIP_RECEIVED
+  CASE_FROZEN
+  CLAIM_ADOPTED
 }
 
 enum LedgerReason {
   BOUNTY_ESCROW
   BOUNTY_REFUND
+  BOUNTY_TOPUP
   STARTING_GRANT
   TIP_SENT
   TIP_RECEIVED
@@ -118,18 +126,19 @@ model User {
   balance      Int      @default(0)
   createdAt    DateTime @default(now())
 
-  bountiesPosted  Bounty[]          @relation("PatronBounties")
-  applications    Application[]
-  casesAsClaimant Case[]            @relation("ClaimantCases")
-  ledgerEntries   LedgerEntry[]
-  tipsSent        Tip[]             @relation("TipsSent")
-  tipsReceived    Tip[]             @relation("TipsReceived")
-  challenges      Challenge[]
-  challengeUpvotes ChallengeUpvote[]
-  challengeRulings ChallengeRuling[]
-  certaintyVotes  CertaintyVote[]
-  caseParticipant CaseParticipant[]
-  notifications   Notification[]
+  bountiesPosted      Bounty[]             @relation("PatronBounties")
+  applications        Application[]
+  casesAsClaimant     Case[]               @relation("ClaimantCases")
+  ledgerEntries       LedgerEntry[]
+  tipsSent            Tip[]                @relation("TipsSent")
+  tipsReceived        Tip[]                @relation("TipsReceived")
+  challenges          Challenge[]
+  challengeUpvotes    ChallengeUpvote[]
+  challengeRulings    ChallengeRuling[]
+  certaintyVotes      CertaintyVote[]
+  caseParticipant     CaseParticipant[]
+  notifications       Notification[]
+  bountyContributions BountyContribution[]
 }
 
 /// A patron's call for a claimant: "the bounty board" itself. Posting one
@@ -145,18 +154,34 @@ model Bounty {
   patron   User   @relation("PatronBounties", fields: [patronId], references: [id])
   patronId String
 
-  applications Application[]
-  case         Case?
+  applications  Application[]
+  case          Case?
+  contributions BountyContribution[]
+}
+
+/// A top-up on a bounty whose case is frozen (see Case.frozenAt) — anyone
+/// can add cred to entice a new claimant to adopt it. No burn, same spirit
+/// as tipping: it's added straight to Bounty.amount, so it just enlarges
+/// the pot the eventual verdict pays out of.
+model BountyContribution {
+  id        String   @id @default(cuid())
+  amount    Int
+  createdAt DateTime @default(now())
+
+  bounty        Bounty @relation(fields: [bountyId], references: [id])
+  bountyId      String
+  contributor   User   @relation(fields: [contributorId], references: [id])
+  contributorId String
 }
 
 /// A claimant answering the call: their proposed claim and stated opening
 /// certainty. The patron picks exactly one per bounty.
 model Application {
-  id         String            @id @default(cuid())
-  claimText  String
-  certainty  Int
-  status     ApplicationStatus @default(PENDING)
-  createdAt  DateTime          @default(now())
+  id        String            @id @default(cuid())
+  claimText String
+  certainty Int
+  status    ApplicationStatus @default(PENDING)
+  createdAt DateTime          @default(now())
 
   bounty   Bounty @relation(fields: [bountyId], references: [id])
   bountyId String
@@ -171,7 +196,7 @@ model Application {
 /// driven by lib/case-transitions.ts, which lazily advances `stage` whenever
 /// the case is viewed: no one has to click "close this round."
 model Case {
-  id               String    @id @default(cuid())
+  id               String @id @default(cuid())
   originalClaim    String
   currentClaim     String
   openingCertainty Int
@@ -185,9 +210,22 @@ model Case {
   interimAudience Int?
   finalAudience   Int?
 
-  stage      CaseStage @default(AWAITING_OPENING_VOTE)
-  wasNarrowed Boolean  @default(false)
-  wasRetreat  Boolean  @default(false)
+  stage       CaseStage @default(AWAITING_OPENING_VOTE)
+  wasNarrowed Boolean   @default(false)
+  wasRetreat  Boolean   @default(false)
+
+  /// Set the moment a round opens (buyRound) or a vote hits quorum and is
+  /// waiting on the claimant to commit — cleared once that action lands.
+  /// Read by case-transitions.ts to detect a claimant who's gone quiet for
+  /// 48h past this point.
+  awaitingClaimantSince DateTime?
+  /// Set when a lapsed claimant is cleared out; the case sits exactly where
+  /// it was (bought challenges, rulings, votes all untouched) until someone
+  /// adopts it. Null claimantId + non-null frozenAt is the frozen state.
+  frozenAt              DateTime?
+  /// Every claimantId this case has ever had and lost to a lapse — barred
+  /// from adopting it again.
+  barredClaimantIds     String[]  @default([])
 
   verdict          Verdict?
   gradeSwing       Float?
@@ -201,8 +239,9 @@ model Case {
   bounty   Bounty @relation(fields: [bountyId], references: [id])
   bountyId String @unique
 
-  claimant   User   @relation("ClaimantCases", fields: [claimantId], references: [id])
-  claimantId String
+  /// Null while frozen and awaiting a new claimant.
+  claimant   User?   @relation("ClaimantCases", fields: [claimantId], references: [id])
+  claimantId String?
 
   challenges     Challenge[]
   certaintyVotes CertaintyVote[]
@@ -249,8 +288,8 @@ model Challenge {
   author   User   @relation(fields: [authorId], references: [id])
   authorId String
 
-  upvotes  ChallengeUpvote[]
-  rulings  ChallengeRuling[]
+  upvotes   ChallengeUpvote[]
+  rulings   ChallengeRuling[]
   narrowing ClaimNarrowing?
 }
 
@@ -258,8 +297,8 @@ model Challenge {
 /// bought" rule only means something if this can't be inflated by clicking
 /// the same button twice.
 model ChallengeUpvote {
-  id          String   @id @default(cuid())
-  createdAt   DateTime @default(now())
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
 
   challenge   Challenge @relation(fields: [challengeId], references: [id])
   challengeId String

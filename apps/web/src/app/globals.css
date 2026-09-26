@@ -180,6 +180,10 @@ main {
   background: var(--ink);
   color: var(--on-ink);
 }
+.pill.warn {
+  background: var(--gold);
+  color: var(--ink);
+}
 
 .btn {
   border: 0;

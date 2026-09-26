@@ -67,14 +67,20 @@ export default async function BountyDetailPage({
         <>
           <section className="sheet quiet">
             <p className="who small muted">
-              Claimant: {bounty.case.claimant.username}
-              {user && user.id !== bounty.case.claimantId && (
-                <TipForm
-                  recipientId={bounty.case.claimantId}
-                  recipientName={bounty.case.claimant.username}
-                  bountyId={bounty.id}
-                  returnPath={returnPath}
-                />
+              {bounty.case.claimant ? (
+                <>
+                  Claimant: {bounty.case.claimant.username}
+                  {user && user.id !== bounty.case.claimantId && (
+                    <TipForm
+                      recipientId={bounty.case.claimantId!}
+                      recipientName={bounty.case.claimant.username}
+                      bountyId={bounty.id}
+                      returnPath={returnPath}
+                    />
+                  )}
+                </>
+              ) : (
+                "Frozen — awaiting a new claimant"
               )}
             </p>
             <p className="serif" style={{ fontSize: 18 }}>

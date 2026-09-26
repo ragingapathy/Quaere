@@ -25,11 +25,16 @@ export default async function BountyBoardPage() {
   return (
     <>
       <section className="sheet">
-        <h1>The bounty board</h1>
-        <p className="lede">
-          A patron funds a case here. Claimants who want it answer the call below with their own
-          claim and a stated certainty; the patron picks one to actually run the case.
-        </p>
+        <div className="hero">
+          <div className="hero-text">
+            <h1>The bounty board</h1>
+            <p className="lede">
+              A patron funds a case here. Claimants who want it answer the call below with their
+              own claim and a stated certainty; the patron picks one to actually run the case.
+            </p>
+          </div>
+          <img src="/mascot.png" alt="" aria-hidden="true" className="mascot" width={524} height={600} />
+        </div>
         <a className="btn" href="/bounties/new">
           Post a bounty
         </a>

@@ -303,6 +303,29 @@ th.num {
   margin-top: 4px;
 }
 
+.hero {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.hero-text {
+  flex: 1 1 320px;
+}
+.mascot {
+  width: 132px;
+  height: auto;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 6px 10px rgba(30, 42, 34, 0.25));
+  transform: rotate(-4deg);
+  margin-left: auto;
+}
+@media (max-width: 480px) {
+  .mascot {
+    width: 96px;
+  }
+}
+
 footer {
   padding: 0 0 40px;
   font-size: 13px;

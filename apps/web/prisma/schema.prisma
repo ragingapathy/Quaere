@@ -1,0 +1,400 @@
+// Quaere — multiplayer schema.
+//
+// Covers the bounty board and the full round-play loop: challenges, jury
+// rulings, certainty votes, verdict, and escrow payout. @quaere/rules holds
+// the actual scoring math (resolveCase, resolveEscrow, verdictOf) as pure
+// functions; everything here just persists the inputs and outputs of those.
+//
+// The 48-hour backstop: a case whose claimant goes quiet (doesn't answer a
+// bought round, or doesn't commit certainty once a vote hits quorum) gets
+// frozen in place — claimantId cleared, everything else left exactly as it
+// stood — rather than refunded and deleted. Anyone not barred (i.e. not the
+// claimant who walked away) can adopt it with one click and pick up the
+// defense; anyone can top up the remaining bounty to entice a taker, no
+// burn, same spirit as tipping. The patron's own exit valve is to cancel a
+// frozen case outright, pulling back whatever's left of escrow — challenge
+// authors keep what they were already paid at buy time either way.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum BountyStatus {
+  OPEN
+  CLAIMED
+  LAPSED
+}
+
+enum ApplicationStatus {
+  PENDING
+  SELECTED
+  DECLINED
+  WITHDRAWN
+}
+
+/// Mirrors @quaere/rules' implicit case progression.
+enum CaseStage {
+  AWAITING_OPENING_VOTE
+  ROUND_1_OPEN
+  ROUND_1_DEFENSE
+  AWAITING_INTERIM_VOTE
+  ROUND_2_OPEN
+  ROUND_2_DEFENSE
+  AWAITING_FINAL_VOTE
+  VERDICT
+  FORFEITED
+}
+
+enum ChallengeType {
+  QUESTION
+  COUNTERFACT
+}
+
+enum CounterfactMove {
+  REFUTE
+  NARROW
+  CONCEDE
+}
+
+enum NarrowingRuling {
+  REFINEMENT
+  RETREAT
+}
+
+/// A single juror's ruling on one challenge. Questions and counterfacts
+/// share this enum; a challenge only ever collects values from its own type.
+enum RulingValue {
+  ANSWERED
+  PARTIAL
+  DODGED
+  CONVINCING
+  NOT_CONVINCING
+}
+
+enum CertaintyStage {
+  OPENING
+  INTERIM
+  FINAL
+}
+
+enum Verdict {
+  UPHELD
+  AMENDED
+  UNMOVED
+  OVERTURNED
+  FORFEITED
+}
+
+enum NotificationType {
+  SELECTED_AS_CLAIMANT
+  APPLICATION_RECEIVED
+  QUORUM_REACHED
+  ROUND_OPENED
+  ROUND_CLOSED
+  VERDICT_READY
+  TIP_RECEIVED
+  CASE_FROZEN
+  CLAIM_ADOPTED
+}
+
+enum LedgerReason {
+  BOUNTY_ESCROW
+  BOUNTY_REFUND
+  BOUNTY_TOPUP
+  STARTING_GRANT
+  TIP_SENT
+  TIP_RECEIVED
+  CHALLENGE_PURCHASE
+  CASE_PAYOUT_CLAIMANT
+  CASE_PAYOUT_CHALLENGER
+  CASE_PAYOUT_PATRON
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  username     String   @unique
+  passwordHash String
+  /// Cred balance. Always equal to the sum of this user's LedgerEntry rows —
+  /// registration writes a STARTING_GRANT entry rather than defaulting this
+  /// field, so the balance is never a number with no ledger backing it.
+  balance      Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  bountiesPosted      Bounty[]             @relation("PatronBounties")
+  applications        Application[]
+  casesAsClaimant     Case[]               @relation("ClaimantCases")
+  ledgerEntries       LedgerEntry[]
+  tipsSent            Tip[]                @relation("TipsSent")
+  tipsReceived        Tip[]                @relation("TipsReceived")
+  challenges          Challenge[]
+  challengeUpvotes    ChallengeUpvote[]
+  challengeRulings    ChallengeRuling[]
+  certaintyVotes      CertaintyVote[]
+  caseParticipant     CaseParticipant[]
+  notifications       Notification[]
+  bountyContributions BountyContribution[]
+}
+
+/// A patron's call for a claimant: "the bounty board" itself. Posting one
+/// escrows `amount` cred out of the patron's balance immediately.
+model Bounty {
+  id                 String       @id @default(cuid())
+  topic              String
+  amount             Int
+  challengesPerRound Int          @default(5)
+  status             BountyStatus @default(OPEN)
+  createdAt          DateTime     @default(now())
+
+  patron   User   @relation("PatronBounties", fields: [patronId], references: [id])
+  patronId String
+
+  applications  Application[]
+  case          Case?
+  contributions BountyContribution[]
+}
+
+/// A top-up on a bounty whose case is frozen (see Case.frozenAt) — anyone
+/// can add cred to entice a new claimant to adopt it. No burn, same spirit
+/// as tipping: it's added straight to Bounty.amount, so it just enlarges
+/// the pot the eventual verdict pays out of.
+model BountyContribution {
+  id        String   @id @default(cuid())
+  amount    Int
+  createdAt DateTime @default(now())
+
+  bounty        Bounty @relation(fields: [bountyId], references: [id])
+  bountyId      String
+  contributor   User   @relation(fields: [contributorId], references: [id])
+  contributorId String
+}
+
+/// A claimant answering the call: their proposed claim and stated opening
+/// certainty. The patron picks exactly one per bounty.
+model Application {
+  id        String            @id @default(cuid())
+  claimText String
+  certainty Int
+  status    ApplicationStatus @default(PENDING)
+  createdAt DateTime          @default(now())
+
+  bounty   Bounty @relation(fields: [bountyId], references: [id])
+  bountyId String
+
+  claimant   User   @relation(fields: [claimantId], references: [id])
+  claimantId String
+
+  @@unique([bountyId, claimantId])
+}
+
+/// Created the moment a patron selects a claimant. Everything from here is
+/// driven by lib/case-transitions.ts, which lazily advances `stage` whenever
+/// the case is viewed: no one has to click "close this round."
+model Case {
+  id               String @id @default(cuid())
+  originalClaim    String
+  currentClaim     String
+  openingCertainty Int
+  interimCertainty Int?
+  finalCertainty   Int?
+
+  /// Sealed trimmed-median audience values. Null until quorum (9 distinct
+  /// votes) is reached for that stage; frozen the instant it's set — later
+  /// votes for an already-sealed stage are rejected, not counted.
+  openingAudience Int?
+  interimAudience Int?
+  finalAudience   Int?
+
+  stage       CaseStage @default(AWAITING_OPENING_VOTE)
+  wasNarrowed Boolean   @default(false)
+  wasRetreat  Boolean   @default(false)
+
+  /// Set the moment a round opens (buyRound) or a vote hits quorum and is
+  /// waiting on the claimant to commit — cleared once that action lands.
+  /// Read by case-transitions.ts to detect a claimant who's gone quiet for
+  /// 48h past this point.
+  awaitingClaimantSince DateTime?
+  /// Set when a lapsed claimant is cleared out; the case sits exactly where
+  /// it was (bought challenges, rulings, votes all untouched) until someone
+  /// adopts it. Null claimantId + non-null frozenAt is the frozen state.
+  frozenAt              DateTime?
+  /// Every claimantId this case has ever had and lost to a lapse — barred
+  /// from adopting it again.
+  barredClaimantIds     String[]  @default([])
+
+  verdict          Verdict?
+  gradeSwing       Float?
+  gradeDefense     Float?
+  gradeCalibration Float?
+  grade            Float?
+  resolvedAt       DateTime?
+
+  createdAt DateTime @default(now())
+
+  bounty   Bounty @relation(fields: [bountyId], references: [id])
+  bountyId String @unique
+
+  /// Null while frozen and awaiting a new claimant.
+  claimant   User?   @relation("ClaimantCases", fields: [claimantId], references: [id])
+  claimantId String?
+
+  challenges     Challenge[]
+  certaintyVotes CertaintyVote[]
+  participants   CaseParticipant[]
+  narrowings     ClaimNarrowing[]
+}
+
+/// One audit-trail row per accepted narrowing, so "how the claim changed"
+/// can be shown in full later — the claim's own text field only ever holds
+/// the current wording.
+model ClaimNarrowing {
+  id        String   @id @default(cuid())
+  round     Int
+  text      String
+  createdAt DateTime @default(now())
+
+  case        Case      @relation(fields: [caseId], references: [id])
+  caseId      String
+  challenge   Challenge @relation(fields: [challengeId], references: [id])
+  challengeId String    @unique
+}
+
+/// A question or counterfact, submitted to a case's open pool and (maybe)
+/// later bought into a round. The claimant's response fields double as "has
+/// this been answered" — null means not yet.
+model Challenge {
+  id     String        @id @default(cuid())
+  type   ChallengeType
+  text   String
+  hidden Boolean       @default(false)
+  /// Null while still in the open pool; 1 or 2 once a patron buys it.
+  round  Int?
+
+  respMode        CounterfactMove?
+  respText        String?
+  respSource      String?
+  respNarrowed    String?
+  narrowingRuling NarrowingRuling?
+
+  createdAt DateTime @default(now())
+
+  case     Case   @relation(fields: [caseId], references: [id])
+  caseId   String
+  author   User   @relation(fields: [authorId], references: [id])
+  authorId String
+
+  upvotes   ChallengeUpvote[]
+  rulings   ChallengeRuling[]
+  narrowing ClaimNarrowing?
+}
+
+/// One upvote per user per challenge — the "top-voted challenge must be
+/// bought" rule only means something if this can't be inflated by clicking
+/// the same button twice.
+model ChallengeUpvote {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  challenge   Challenge @relation(fields: [challengeId], references: [id])
+  challengeId String
+  user        User      @relation(fields: [userId], references: [id])
+  userId      String
+
+  @@unique([challengeId, userId])
+}
+
+/// One juror's ruling on one challenge. A challenge is "settled" (counts
+/// toward closing its round) once it has 9 distinct rulings.
+model ChallengeRuling {
+  id        String      @id @default(cuid())
+  value     RulingValue
+  createdAt DateTime    @default(now())
+
+  challenge   Challenge @relation(fields: [challengeId], references: [id])
+  challengeId String
+  user        User      @relation(fields: [userId], references: [id])
+  userId      String
+
+  @@unique([challengeId, userId])
+}
+
+/// One audience member's certainty vote for one stage of one case. A stage
+/// seals (rules.trimmedMedian is computed and frozen onto Case) once 9
+/// distinct votes are in.
+model CertaintyVote {
+  id        String         @id @default(cuid())
+  stage     CertaintyStage
+  value     Int
+  createdAt DateTime       @default(now())
+
+  case   Case   @relation(fields: [caseId], references: [id])
+  caseId String
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+
+  @@unique([caseId, stage, userId])
+}
+
+/// Cheap "who's actually engaged with this case" tracking — upserted the
+/// first time a user votes, submits a challenge, upvotes one, or rules on
+/// one. Powers the /mine feed and the live "X of 9" quorum display; the
+/// strict quorum gates themselves count CertaintyVote/ChallengeRuling rows
+/// directly, not this table.
+model CaseParticipant {
+  id       String   @id @default(cuid())
+  joinedAt DateTime @default(now())
+
+  case   Case   @relation(fields: [caseId], references: [id])
+  caseId String
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+
+  @@unique([caseId, userId])
+}
+
+/// A direct cred gift, separate from playing a role in a case. Gated in the
+/// app layer (see lib/tipping.ts) so a fresh account can't mint cred at
+/// registration and immediately launder it to another wallet.
+model Tip {
+  id        String   @id @default(cuid())
+  amount    Int
+  note      String?
+  createdAt DateTime @default(now())
+
+  sender      User   @relation("TipsSent", fields: [senderId], references: [id])
+  senderId    String
+  recipient   User   @relation("TipsReceived", fields: [recipientId], references: [id])
+  recipientId String
+
+  bountyId String?
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  type      NotificationType
+  message   String
+  caseId    String?
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+}
+
+/// Every cred movement, so a balance is always reconstructable and never
+/// just an opaque mutated integer.
+model LedgerEntry {
+  id        String       @id @default(cuid())
+  amount    Int
+  reason    LedgerReason
+  bountyId  String?
+  createdAt DateTime     @default(now())
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+}

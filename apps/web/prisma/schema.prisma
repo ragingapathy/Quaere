@@ -1,0 +1,135 @@
+// Quaere — multiplayer schema.
+//
+// This models the full case lifecycle so later milestones don't force a
+// redesign, but only the bounty-board slice (Bounty, Application, and the
+// Case row it produces) has API/UI behind it right now. Challenge, Poll,
+// and verdict/escrow persistence are deliberately left for the next
+// milestone; @quaere/rules already has the pure functions that will score
+// them (resolveCase, resolveEscrow) once those tables exist.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum BountyStatus {
+  OPEN
+  CLAIMED
+  LAPSED
+}
+
+enum ApplicationStatus {
+  PENDING
+  SELECTED
+  DECLINED
+  WITHDRAWN
+}
+
+/// Mirrors @quaere/rules' CaseStage-shaped progression. Only the first value
+/// is ever reached by code that exists today; the rest name where round-play
+/// (not yet built) picks up.
+enum CaseStage {
+  AWAITING_OPENING_VOTE
+  ROUND_1
+  ROUND_2
+  FINAL_VOTE
+  VERDICT
+  FORFEITED
+}
+
+enum LedgerReason {
+  BOUNTY_ESCROW
+  BOUNTY_REFUND
+  STARTING_GRANT
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  username     String   @unique
+  passwordHash String
+  /// Cred balance. Always equal to the sum of this user's LedgerEntry rows —
+  /// registration writes a STARTING_GRANT entry rather than defaulting this
+  /// field, so the balance is never a number with no ledger backing it. The
+  /// design docs are silent on the exact onboarding grant; it's a
+  /// placeholder pending playtesting.
+  balance      Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  bountiesPosted Bounty[]      @relation("PatronBounties")
+  applications   Application[]
+  casesAsClaimant Case[]       @relation("ClaimantCases")
+  ledgerEntries  LedgerEntry[]
+}
+
+/// A patron's call for a claimant: "the bounty board" itself. Posting one
+/// escrows `amount` cred out of the patron's balance immediately (Design
+/// Bible: "the bounty is in escrow" the moment it's posted).
+model Bounty {
+  id                 String       @id @default(cuid())
+  topic              String
+  amount             Int
+  challengesPerRound Int          @default(5)
+  status             BountyStatus @default(OPEN)
+  createdAt          DateTime     @default(now())
+
+  patron   User   @relation("PatronBounties", fields: [patronId], references: [id])
+  patronId String
+
+  applications Application[]
+  case         Case?
+}
+
+/// A claimant answering the call: their proposed claim and stated opening
+/// certainty. The patron picks exactly one per bounty (Decision Log: "Patron
+/// picks the claimant").
+model Application {
+  id         String            @id @default(cuid())
+  claimText  String
+  certainty  Int
+  status     ApplicationStatus @default(PENDING)
+  createdAt  DateTime          @default(now())
+
+  bounty   Bounty @relation(fields: [bountyId], references: [id])
+  bountyId String
+
+  claimant   User   @relation(fields: [claimantId], references: [id])
+  claimantId String
+
+  @@unique([bountyId, claimantId])
+}
+
+/// Created the moment a patron selects a claimant. Everything past the
+/// opening certainty (challenges, rounds, votes, verdict, escrow payout) is
+/// the next milestone.
+model Case {
+  id               String    @id @default(cuid())
+  originalClaim    String
+  currentClaim     String
+  openingCertainty Int
+  stage            CaseStage @default(AWAITING_OPENING_VOTE)
+  createdAt        DateTime  @default(now())
+
+  bounty   Bounty @relation(fields: [bountyId], references: [id])
+  bountyId String @unique
+
+  claimant   User   @relation("ClaimantCases", fields: [claimantId], references: [id])
+  claimantId String
+}
+
+/// Every cred movement, so a balance is always reconstructable and never
+/// just an opaque mutated integer.
+model LedgerEntry {
+  id        String       @id @default(cuid())
+  amount    Int
+  reason    LedgerReason
+  bountyId  String?
+  createdAt DateTime     @default(now())
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+}

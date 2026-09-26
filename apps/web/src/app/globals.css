@@ -1,0 +1,282 @@
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,100..900;1,9..144,100..900&family=Libre+Caslon+Text:ital,wght@0,400;0,700;1,400&family=Public+Sans:wght@400;500;600;700&display=swap");
+
+/*
+ * Visual identity per the Quaere Decision Log: a grey-green "ledger"
+ * palette (meticulous record-keeping), Fraunces reserved for the wordmark,
+ * Libre Caslon Text for headings and claims, Public Sans for body text.
+ */
+:root {
+  --paper: #cbdccb;
+  --sheet: #f5f9f5;
+  --ink: #1e2a22;
+  --muted: #5c6e5f;
+  --rule: #a9bfac;
+  --tint: #e3ede3;
+  --sage: #b2d4b6;
+  --seal: #8a2a34;
+  --amber: #94600f;
+  --on-ink: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #141b16;
+    --sheet: #1c2620;
+    --ink: #e3ece4;
+    --muted: #93a896;
+    --rule: #344437;
+    --tint: #23302a;
+    --sage: #9cc2a1;
+    --seal: #e17681;
+    --amber: #e3a85c;
+    --on-ink: #141b16;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.55 "Public Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.serif {
+  font-family: "Libre Caslon Text", Georgia, serif;
+}
+
+.wordmark {
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 800;
+  font-style: italic;
+  font-variation-settings:
+    "SOFT" 60,
+    "WONK" 0,
+    "opsz" 30;
+  letter-spacing: -0.01em;
+}
+
+a {
+  color: inherit;
+}
+
+h1,
+h2,
+h3 {
+  font-family: "Libre Caslon Text", Georgia, serif;
+  font-weight: 400;
+  line-height: 1.2;
+  margin: 0 0 10px;
+}
+
+h1 {
+  font-size: 26px;
+}
+h2 {
+  font-size: 20px;
+}
+h3 {
+  font-size: 16px;
+}
+
+p {
+  margin: 0 0 12px;
+  max-width: 68ch;
+}
+
+.muted {
+  color: var(--muted);
+}
+.small {
+  font-size: 14px;
+}
+.tiny {
+  font-size: 13px;
+}
+
+.wrap {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--paper);
+  border-bottom: 1px solid var(--rule);
+}
+
+.top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 0;
+  flex-wrap: wrap;
+}
+
+.nav-links {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+main {
+  padding: 24px 0 60px;
+}
+
+.sheet {
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-top: 3px solid var(--ink);
+  border-radius: 4px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.sheet.quiet {
+  border-top-width: 1px;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.spread {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pill {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--tint);
+  color: var(--muted);
+}
+.pill.open {
+  background: var(--sage);
+  color: var(--ink);
+}
+.pill.claimed {
+  background: var(--ink);
+  color: var(--on-ink);
+}
+
+.btn {
+  border: 0;
+  background: var(--ink);
+  color: var(--on-ink);
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-weight: 600;
+  font-size: 15px;
+  cursor: pointer;
+  display: inline-block;
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btn.ghost {
+  background: transparent;
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+.btn.danger {
+  background: transparent;
+  color: var(--seal);
+  box-shadow: inset 0 0 0 1px var(--seal);
+}
+.btn.small {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+label.field {
+  display: block;
+  margin: 0 0 12px;
+}
+label.field > span {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+textarea {
+  width: 100%;
+  background: var(--tint);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 10px 12px;
+  font: inherit;
+  color: inherit;
+}
+textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.status.error {
+  padding: 10px 12px;
+  border-radius: 4px;
+  font-size: 14px;
+  margin: 0 0 16px;
+  background: color-mix(in srgb, var(--seal) 14%, transparent);
+  color: var(--seal);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+th,
+td {
+  text-align: left;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+th {
+  font-weight: 600;
+  color: var(--muted);
+}
+td.num,
+th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.entry {
+  border-top: 1px solid var(--rule);
+  padding: 12px 0;
+}
+.entry:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+footer {
+  padding: 0 0 40px;
+  font-size: 13px;
+  color: var(--muted);
+}

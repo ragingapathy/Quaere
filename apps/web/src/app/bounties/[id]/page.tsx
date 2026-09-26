@@ -2,8 +2,10 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { applyToBountyAction, selectClaimantAction, withdrawApplicationAction } from "@/lib/actions/bounties";
+import { checkAndAdvanceCase } from "@/lib/case-transitions";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { TipForm } from "@/components/TipForm";
+import CaseRoundPlay from "@/components/CaseRoundPlay";
 
 export default async function BountyDetailPage({
   params,
@@ -13,6 +15,9 @@ export default async function BountyDetailPage({
   searchParams: { error?: string };
 }) {
   const user = await getCurrentUser();
+
+  const existing = await prisma.bounty.findUnique({ where: { id: params.id }, select: { case: { select: { id: true } } } });
+  if (existing?.case) await checkAndAdvanceCase(existing.case.id);
 
   const bounty = await prisma.bounty.findUnique({
     where: { id: params.id },
@@ -59,27 +64,30 @@ export default async function BountyDetailPage({
       <ErrorBanner message={searchParams.error} />
 
       {bounty.case && (
-        <section className="sheet quiet">
-          <h2>The case</h2>
-          <p className="who small muted">
-            Claimant: {bounty.case.claimant.username}
-            {user && user.id !== bounty.case.claimantId && (
-              <TipForm
-                recipientId={bounty.case.claimantId}
-                recipientName={bounty.case.claimant.username}
-                bountyId={bounty.id}
-                returnPath={returnPath}
-              />
-            )}
-          </p>
-          <p className="serif" style={{ fontSize: 18 }}>
-            {bounty.case.currentClaim}
-          </p>
-          <p className="small muted">
-            Staked at {bounty.case.openingCertainty}% certainty. Round play (challenges, defense,
-            votes, verdict) isn't built yet — this is as far as the bounty board goes for now.
-          </p>
-        </section>
+        <>
+          <section className="sheet quiet">
+            <p className="who small muted">
+              Claimant: {bounty.case.claimant.username}
+              {user && user.id !== bounty.case.claimantId && (
+                <TipForm
+                  recipientId={bounty.case.claimantId}
+                  recipientName={bounty.case.claimant.username}
+                  bountyId={bounty.id}
+                  returnPath={returnPath}
+                />
+              )}
+            </p>
+            <p className="serif" style={{ fontSize: 18 }}>
+              {bounty.case.currentClaim}
+            </p>
+          </section>
+          <CaseRoundPlay
+            bountyId={bounty.id}
+            caseId={bounty.case.id}
+            viewerId={user?.id ?? null}
+            isPatron={isPatron}
+          />
+        </>
       )}
 
       {!user && bounty.status === "OPEN" && !bounty.case && (

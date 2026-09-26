@@ -30,3 +30,12 @@ export const STARTING_GRANT = 1500;
 export const MAX_TIP_AMOUNT = 500;
 export const TIP_DAILY_CAP_PER_SENDER = 1000;
 export const TIP_LIFETIME_CAP_PER_PAIR = 1000;
+
+/**
+ * How many independent judgments it takes for anything in this game to
+ * count as settled: a certainty vote seals, a challenge's ruling settles,
+ * once each has this many distinct participants. One number, benched
+ * consistently everywhere a threshold is needed — the same size as the
+ * U.S. Supreme Court, which is exactly as arbitrary and exactly as final.
+ */
+export const QUORUM = 9;

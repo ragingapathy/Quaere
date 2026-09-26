@@ -25,6 +25,13 @@ export default async function NewBountyPage({
           <label className="field">
             <span>Topic</span>
             <input type="text" name="topic" required placeholder="e.g. AI and the cost of living" />
+            <p className="tiny muted" style={{ marginTop: 4 }}>
+              Fund a subject, not a claim. The claimant who answers your call is the one who stakes
+              the actual claim and how sure they are of it — a topic that's already a specific,
+              dated assertion doesn't leave them anything to stake. <b>Too narrow:</b> "An AI-related
+              breach will happen in the next 5 months." <b>Better:</b> "AI and the next cybersecurity
+              incident" — it names the ground without picking the claim for them.
+            </p>
           </label>
           <label className="field" style={{ maxWidth: 280 }}>
             <span>Bounty amount (cred)</span>

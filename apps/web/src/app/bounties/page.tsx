@@ -1,8 +1,13 @@
 import { prisma } from "@/lib/db";
-import { CHALLENGES_PER_ROUND } from "@/lib/constants";
+import { CHALLENGES_PER_ROUND, STARTING_GRANT } from "@/lib/constants";
+import { getEconomyStats } from "@/lib/economy";
+
+function fmt(n: number): string {
+  return Math.round(n).toLocaleString();
+}
 
 export default async function BountyBoardPage() {
-  const [open, claimed] = await Promise.all([
+  const [open, claimed, stats] = await Promise.all([
     prisma.bounty.findMany({
       where: { status: "OPEN" },
       include: { patron: true, applications: true },
@@ -14,6 +19,7 @@ export default async function BountyBoardPage() {
       orderBy: { createdAt: "desc" },
       take: 10,
     }),
+    getEconomyStats(),
   ]);
 
   return (
@@ -27,6 +33,56 @@ export default async function BountyBoardPage() {
         <a className="btn" href="/bounties/new">
           Post a bounty
         </a>
+      </section>
+
+      <section className="sheet quiet">
+        <h2>The economy</h2>
+        <p className="small muted">
+          Registration is the only place cred is ever created — each new account mints{" "}
+          {STARTING_GRANT} cred. Everything else below is that same cred moving between wallets
+          and open escrow, never created or destroyed.
+        </p>
+        <div className="statrow">
+          <div className="stat">
+            <div className="n">{fmt(stats.totalUsers)}</div>
+            <div className="l">Players</div>
+          </div>
+          <div className="stat">
+            <div className="n">{fmt(stats.totalMinted)}</div>
+            <div className="l">Cred ever minted</div>
+          </div>
+          <div className="stat">
+            <div className="n">{fmt(stats.totalInWallets)}</div>
+            <div className="l">Cred in wallets</div>
+          </div>
+          <div className="stat">
+            <div className="n">{fmt(stats.totalEscrowed)}</div>
+            <div className="l">Cred locked in escrow</div>
+          </div>
+          <div className="stat">
+            <div className="n">
+              {stats.openBounties} / {stats.bountiesPosted}
+            </div>
+            <div className="l">Open / total bounties</div>
+          </div>
+          <div className="stat">
+            <div className="n">{stats.casesRunning}</div>
+            <div className="l">Cases claimed</div>
+          </div>
+          <div className="stat">
+            <div className="n">{stats.totalApplications}</div>
+            <div className="l">Claimant applications</div>
+          </div>
+          <div className="stat">
+            <div className="n">{stats.largestOpenBounty != null ? fmt(stats.largestOpenBounty) : "—"}</div>
+            <div className="l">Largest open bounty</div>
+          </div>
+        </div>
+        <p className="tiny muted" style={{ marginTop: 10 }}>
+          Wallets + escrow ({fmt(stats.totalInWallets + stats.totalEscrowed)}) should always equal
+          cred minted ({fmt(stats.totalMinted)}) — nothing here creates or destroys cred beyond
+          registration.
+        </p>
       </section>
 
       <section className="sheet quiet">

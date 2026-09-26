@@ -12,6 +12,9 @@ export const CHALLENGES_PER_ROUND = 5;
  * prototype's placeholder value pending a real number. */
 export const CHALLENGE_PRICE = 20;
 
-/** Starting cred grant on registration, so a new account can post a bounty
- * at all. Not specified anywhere in the design docs; a placeholder. */
-export const STARTING_GRANT = 1000;
+/** Starting cred grant on registration — this is the only place cred is
+ * ever created; every other movement in the game just reshuffles cred that
+ * already exists (see lib/economy.ts). Not specified in the design docs
+ * beyond "self-reported and encouraged"-style placeholders elsewhere; 1500
+ * is a placeholder pending playtesting. */
+export const STARTING_GRANT = 1500;
